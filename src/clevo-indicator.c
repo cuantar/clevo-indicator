@@ -119,6 +119,7 @@ struct {
 }static menuitems[] = {
         { "Set FAN to AUTO", G_CALLBACK(ui_command_set_fan), 0, AUTO, NULL },
         { "", NULL, 0L, NA, NULL },
+        { "Set FAN to  40%", G_CALLBACK(ui_command_set_fan), 40, MANUAL, NULL },
         { "Set FAN to  60%", G_CALLBACK(ui_command_set_fan), 60, MANUAL, NULL },
         { "Set FAN to  70%", G_CALLBACK(ui_command_set_fan), 70, MANUAL, NULL },
         { "Set FAN to  80%", G_CALLBACK(ui_command_set_fan), 80, MANUAL, NULL },
@@ -307,8 +308,9 @@ static int main_ec_worker(void) {
                 share_info->auto_duty_val = next_duty;
             }
         }
-        //
-        usleep(200 * 1000);
+        // orig: sleep for 200 ms; too fast for fan.
+        // now: try changing twice per second
+        usleep(500 * 1000);
     }
     printf("worker quit\n");
     return EXIT_SUCCESS;
@@ -445,6 +447,7 @@ static int ec_auto_duty_adjust(void) {
     int temp = MAX(share_info->cpu_temp, share_info->gpu_temp);
     int duty = share_info->fan_duty;
     //
+    /*
     if (temp >= 80 && duty < 100)
         return 100;
     if (temp >= 70 && duty < 90)
@@ -453,6 +456,37 @@ static int ec_auto_duty_adjust(void) {
         return 80;
     if (temp >= 50 && duty < 70)
         return 70;
+    */
+
+    if (temp < 48) //&& duty > 0)
+        return 1;
+
+    if (temp >= 48 && temp < 50 && duty > 58)
+        return 58;
+
+    if (temp >= 86 && duty < 100)
+        return 100;
+/*
+maximum at 80 degrees
+80-50 = 30
+30 = 100%
+*/
+    //printf("%d",(int)(100/35.0 * (temp-50)));
+    /* here is where we adjust things */
+    if (temp < 86 && temp > 50)
+        return (int)(58 + (95-58)/(86.0-50.0) * (temp-50));
+
+    /*
+    if (temp >= 85 && duty < 100)
+        return 100;
+    if (temp >= 80 && duty < 80)
+        return 80;
+    if (temp >= 70 && duty < 70)
+        return 70;
+    if (temp >= 65 && duty < 60)
+        return 60;
+
+
     if (temp >= 40 && duty < 60)
         return 60;
     if (temp >= 30 && duty < 50)
@@ -476,6 +510,7 @@ static int ec_auto_duty_adjust(void) {
         return 80;
     if (temp <= 75 && duty > 90)
         return 90;
+    */
     //
     return 0;
 }
@@ -500,7 +535,7 @@ static int ec_query_fan_rpms(void) {
 }
 
 static int ec_write_fan_duty(int duty_percentage) {
-    if (duty_percentage < 60 || duty_percentage > 100) {
+    if (duty_percentage < 1 || duty_percentage > 100) {
         printf("Wrong fan duty to write: %d\n", duty_percentage);
         return EXIT_FAILURE;
     }
@@ -514,7 +549,7 @@ static int ec_io_wait(const uint32_t port, const uint32_t flag,
     uint8_t data = inb(port);
     int i = 0;
     while ((((data >> flag) & 0x1) != value) && (i++ < 100)) {
-        usleep(1000);
+        usleep(2000);
         data = inb(port);
     }
     if (i >= 100) {
