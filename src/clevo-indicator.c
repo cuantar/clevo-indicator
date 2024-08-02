@@ -256,6 +256,15 @@ static void main_init_share(void) {
 static int main_ec_worker(void) {
     setuid(0);
     system("modprobe ec_sys");
+    const int sleep_time_ms = 100;
+    const int seconds_to_average = 30;
+    const int num_steps = (const int)(seconds_to_average*1000/sleep_time_ms);
+    // create the array that will store the last 30 seconds
+    int temps[num_steps];
+    for(int i=0; i<num_steps; i++) {
+        temps[i] = 60;
+    }
+    float average = 0;
     while (share_info->exit == 0) {
         // check parent
         if (parent_pid != 0 && kill(parent_pid, 0) == -1) {
@@ -296,6 +305,15 @@ static int main_ec_worker(void) {
             printf("wrong EC size from sysfs: %ld\n", len);
         }
         close(io_fd);
+        // shift the array downward and put the cpu temp on top
+        for(int i=num_steps; i>0; i--) {
+            temps[i] = temps[i-1];
+            average += temps[i];
+        }
+        temps[0] = share_info->cpu_temp;
+        average += temps[0];
+        average /= num_steps;
+        share_info->cpu_temp = average;
         // auto EC
         if (share_info->auto_duty == 1) {
             int next_duty = ec_auto_duty_adjust();
@@ -310,7 +328,7 @@ static int main_ec_worker(void) {
         }
         // orig: sleep for 200 ms; too fast for fan.
         // now: try changing twice per second
-        usleep(500 * 1000);
+        usleep(sleep_time_ms * 1000);
     }
     printf("worker quit\n");
     return EXIT_SUCCESS;
@@ -447,17 +465,6 @@ static int ec_auto_duty_adjust(void) {
     int temp = MAX(share_info->cpu_temp, share_info->gpu_temp);
     int duty = share_info->fan_duty;
     //
-    /*
-    if (temp >= 80 && duty < 100)
-        return 100;
-    if (temp >= 70 && duty < 90)
-        return 90;
-    if (temp >= 60 && duty < 80)
-        return 80;
-    if (temp >= 50 && duty < 70)
-        return 70;
-    */
-
     if (temp < 48) //&& duty > 0)
         return 1;
 
@@ -476,42 +483,7 @@ maximum at 80 degrees
     if (temp < 86 && temp > 50)
         return (int)(58 + (95-58)/(86.0-50.0) * (temp-50));
 
-    /*
-    if (temp >= 85 && duty < 100)
-        return 100;
-    if (temp >= 80 && duty < 80)
-        return 80;
-    if (temp >= 70 && duty < 70)
-        return 70;
-    if (temp >= 65 && duty < 60)
-        return 60;
-
-
-    if (temp >= 40 && duty < 60)
-        return 60;
-    if (temp >= 30 && duty < 50)
-        return 50;
-    if (temp >= 20 && duty < 40)
-        return 40;
-    if (temp >= 10 && duty < 30)
-        return 30;
-    //
-    if (temp <= 15 && duty > 30)
-        return 30;
-    if (temp <= 25 && duty > 40)
-        return 40;
-    if (temp <= 35 && duty > 50)
-        return 50;
-    if (temp <= 45 && duty > 60)
-        return 60;
-    if (temp <= 55 && duty > 70)
-        return 70;
-    if (temp <= 65 && duty > 80)
-        return 80;
-    if (temp <= 75 && duty > 90)
-        return 90;
-    */
-    //
+    // should never get here
     return 0;
 }
 
